@@ -91,7 +91,9 @@ func (c *command) Close() error {
 	//XXX: If did read the full packfile, then the session might be already
 	//     closed.
 	_ = c.Session.Close()
+	c.Session.Wait()
 	err := c.client.Close()
+	c.client.Wait()
 
 	//XXX: in go1.16+ we can use errors.Is(err, net.ErrClosed)
 	if err != nil && strings.HasSuffix(err.Error(), "use of closed network connection") {
