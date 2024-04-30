@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"encoding/hex"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -16,6 +16,7 @@ import (
 	"github.com/go-git/go-billy/v5/util"
 	fixtures "github.com/go-git/go-git-fixtures/v4"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/stretchr/testify/assert"
 	. "gopkg.in/check.v1"
 )
 
@@ -82,6 +83,15 @@ func (s *SuiteDotGit) TestSetRefsNorwfs(c *C) {
 	dir := New(&norwfs{fs})
 
 	testSetRefs(c, dir)
+}
+
+func (s *SuiteDotGit) TestRefsHeadFirst(c *C) {
+	fs := fixtures.Basic().ByTag(".git").One().DotGit()
+	dir := New(fs)
+	refs, err := dir.Refs()
+	c.Assert(err, IsNil)
+	c.Assert(len(refs), Not(Equals), 0)
+	c.Assert(refs[0].Name().String(), Equals, "HEAD")
 }
 
 func testSetRefs(c *C, dir *DotGit) {
@@ -174,7 +184,6 @@ func (s *SuiteDotGit) TestRefsFromPackedRefs(c *C) {
 	ref := findReference(refs, "refs/remotes/origin/branch")
 	c.Assert(ref, NotNil)
 	c.Assert(ref.Hash().String(), Equals, "e8d3ffab552895c19b9fcf7aa264d277cde33881")
-
 }
 
 func (s *SuiteDotGit) TestRefsFromReferenceFile(c *C) {
@@ -188,7 +197,6 @@ func (s *SuiteDotGit) TestRefsFromReferenceFile(c *C) {
 	c.Assert(ref, NotNil)
 	c.Assert(ref.Type(), Equals, plumbing.SymbolicReference)
 	c.Assert(string(ref.Target()), Equals, "refs/remotes/origin/master")
-
 }
 
 func BenchmarkRefMultipleTimes(b *testing.B) {
@@ -374,7 +382,7 @@ func (s *SuiteDotGit) TestConfigWriteAndConfig(c *C) {
 	f, err = dir.Config()
 	c.Assert(err, IsNil)
 
-	cnt, err := ioutil.ReadAll(f)
+	cnt, err := io.ReadAll(f)
 	c.Assert(err, IsNil)
 
 	c.Assert(string(cnt), Equals, "foo")
@@ -404,7 +412,7 @@ func (s *SuiteDotGit) TestIndexWriteAndIndex(c *C) {
 	f, err = dir.Index()
 	c.Assert(err, IsNil)
 
-	cnt, err := ioutil.ReadAll(f)
+	cnt, err := io.ReadAll(f)
 	c.Assert(err, IsNil)
 
 	c.Assert(string(cnt), Equals, "foo")
@@ -434,7 +442,7 @@ func (s *SuiteDotGit) TestShallowWriteAndShallow(c *C) {
 	f, err = dir.Shallow()
 	c.Assert(err, IsNil)
 
-	cnt, err := ioutil.ReadAll(f)
+	cnt, err := io.ReadAll(f)
 	c.Assert(err, IsNil)
 
 	c.Assert(string(cnt), Equals, "foo")
@@ -537,7 +545,6 @@ func (s *SuiteDotGit) TestObjectPackWithKeepDescriptors(c *C) {
 
 	err = dir.Close()
 	c.Assert(err, NotNil)
-
 }
 
 func (s *SuiteDotGit) TestObjectPackIdx(c *C) {
@@ -648,7 +655,28 @@ func (s *SuiteDotGit) TestObject(c *C) {
 		file.Name(), fs.Join("objects", "03", "db8e1fbe133a480f2867aac478fd866686d69e")),
 		Equals, true,
 	)
-	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" //made up hash
+	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" // made up hash
+	incomingDirPath := fs.Join("objects", "tmp_objdir-incoming-123456")
+	incomingFilePath := fs.Join(incomingDirPath, incomingHash[0:2], incomingHash[2:40])
+	fs.MkdirAll(incomingDirPath, os.FileMode(0755))
+	fs.Create(incomingFilePath)
+
+	_, err = dir.Object(plumbing.NewHash(incomingHash))
+	c.Assert(err, IsNil)
+}
+
+func (s *SuiteDotGit) TestPreGit235Object(c *C) {
+	fs := fixtures.ByTag(".git").ByTag("unpacked").One().DotGit()
+	dir := New(fs)
+
+	hash := plumbing.NewHash("03db8e1fbe133a480f2867aac478fd866686d69e")
+	file, err := dir.Object(hash)
+	c.Assert(err, IsNil)
+	c.Assert(strings.HasSuffix(
+		file.Name(), fs.Join("objects", "03", "db8e1fbe133a480f2867aac478fd866686d69e")),
+		Equals, true,
+	)
+	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" // made up hash
 	incomingDirPath := fs.Join("objects", "incoming-123456")
 	incomingFilePath := fs.Join(incomingDirPath, incomingHash[0:2], incomingHash[2:40])
 	fs.MkdirAll(incomingDirPath, os.FileMode(0755))
@@ -665,8 +693,8 @@ func (s *SuiteDotGit) TestObjectStat(c *C) {
 	hash := plumbing.NewHash("03db8e1fbe133a480f2867aac478fd866686d69e")
 	_, err := dir.ObjectStat(hash)
 	c.Assert(err, IsNil)
-	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" //made up hash
-	incomingDirPath := fs.Join("objects", "incoming-123456")
+	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" // made up hash
+	incomingDirPath := fs.Join("objects", "tmp_objdir-incoming-123456")
 	incomingFilePath := fs.Join(incomingDirPath, incomingHash[0:2], incomingHash[2:40])
 	fs.MkdirAll(incomingDirPath, os.FileMode(0755))
 	fs.Create(incomingFilePath)
@@ -683,8 +711,8 @@ func (s *SuiteDotGit) TestObjectDelete(c *C) {
 	err := dir.ObjectDelete(hash)
 	c.Assert(err, IsNil)
 
-	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" //made up hash
-	incomingDirPath := fs.Join("objects", "incoming-123456")
+	incomingHash := "9d25e0f9bde9f82882b49fe29117b9411cb157b7" // made up hash
+	incomingDirPath := fs.Join("objects", "tmp_objdir-incoming-123456")
 	incomingSubDirPath := fs.Join(incomingDirPath, incomingHash[0:2])
 	incomingFilePath := fs.Join(incomingSubDirPath, incomingHash[2:40])
 
@@ -790,53 +818,139 @@ func (s *SuiteDotGit) TestPackRefs(c *C) {
 	c.Assert(ref.Hash().String(), Equals, "b8d3ffab552895c19b9fcf7aa264d277cde33881")
 }
 
-func (s *SuiteDotGit) TestAlternates(c *C) {
-	fs, clean := s.TemporalFilesystem()
-	defer clean()
+func TestAlternatesDefault(t *testing.T) {
+	// Create a new dotgit object.
+	dotFS := osfs.New(t.TempDir())
 
-	// Create a new dotgit object and initialize.
-	dir := New(fs)
+	testAlternates(t, dotFS, dotFS)
+}
+
+func TestAlternatesWithFS(t *testing.T) {
+	// Create a new dotgit object with a specific FS for alternates.
+	altFS := osfs.New(t.TempDir())
+	dotFS, _ := altFS.Chroot("repo2")
+
+	testAlternates(t, dotFS, altFS)
+}
+
+func TestAlternatesWithBoundOS(t *testing.T) {
+	// Create a new dotgit object with a specific FS for alternates.
+	altFS := osfs.New(t.TempDir(), osfs.WithBoundOS())
+	dotFS, _ := altFS.Chroot("repo2")
+
+	testAlternates(t, dotFS, altFS)
+}
+
+func testAlternates(t *testing.T, dotFS, altFS billy.Filesystem) {
+	tests := []struct {
+		name      string
+		in        []string
+		inWindows []string
+		setup     func()
+		wantErr   bool
+		wantRoots []string
+	}{
+		{
+			name: "no alternates",
+		},
+		{
+			name:      "abs path",
+			in:        []string{filepath.Join(altFS.Root(), "./repo1/.git/objects")},
+			inWindows: []string{filepath.Join(altFS.Root(), ".\\repo1\\.git\\objects")},
+			setup: func() {
+				err := altFS.MkdirAll(filepath.Join("repo1", ".git", "objects"), 0o700)
+				assert.NoError(t, err)
+			},
+			wantRoots: []string{filepath.Join("repo1", ".git")},
+		},
+		{
+			name:      "rel path",
+			in:        []string{"../../../repo3//.git/objects"},
+			inWindows: []string{"..\\..\\..\\repo3\\.git\\objects"},
+			setup: func() {
+				err := altFS.MkdirAll(filepath.Join("repo3", ".git", "objects"), 0o700)
+				assert.NoError(t, err)
+			},
+			wantRoots: []string{filepath.Join("repo3", ".git")},
+		},
+		{
+			name:      "invalid abs path",
+			in:        []string{"/alt/target2"},
+			inWindows: []string{"\\alt\\target2"},
+			wantErr:   true,
+		},
+		{
+			name:      "invalid rel path",
+			in:        []string{"../../../alt/target3"},
+			inWindows: []string{"..\\..\\..\\alt\\target3"},
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := NewWithOptions(dotFS, Options{AlternatesFS: altFS})
+			err := dir.Initialize()
+			assert.NoError(t, err)
+
+			content := strings.Join(tc.in, "\n")
+			if runtime.GOOS == "windows" {
+				content = strings.Join(tc.inWindows, "\r\n")
+			}
+
+			// Create alternates file.
+			altpath := dotFS.Join("objects", "info", "alternates")
+			f, err := dotFS.Create(altpath)
+			assert.NoError(t, err)
+			f.Write([]byte(content))
+			f.Close()
+
+			if tc.setup != nil {
+				tc.setup()
+			}
+
+			dotgits, err := dir.Alternates()
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			for i, d := range dotgits {
+				assert.Regexp(t, "^"+regexp.QuoteMeta(altFS.Root()), d.fs.Root())
+				assert.Regexp(t, regexp.QuoteMeta(tc.wantRoots[i])+"$", d.fs.Root())
+			}
+		})
+	}
+}
+
+func TestAlternatesDupes(t *testing.T) {
+	dotFS := osfs.New(t.TempDir())
+	dir := New(dotFS)
 	err := dir.Initialize()
-	c.Assert(err, IsNil)
+	assert.NoError(t, err)
+
+	path := filepath.Join(dotFS.Root(), "target3")
+	dupes := []string{path, path, path, path, path}
+
+	content := strings.Join(dupes, "\n")
+	if runtime.GOOS == "windows" {
+		content = strings.Join(dupes, "\r\n")
+	}
+
+	err = dotFS.MkdirAll("target3", 0o700)
+	assert.NoError(t, err)
 
 	// Create alternates file.
-	altpath := fs.Join("objects", "info", "alternates")
-	f, err := fs.Create(altpath)
-	c.Assert(err, IsNil)
-
-	// Multiple alternates.
-	var strContent string
-	if runtime.GOOS == "windows" {
-		strContent = "C:\\Users\\username\\repo1\\.git\\objects\r\n..\\..\\..\\rep2\\.git\\objects"
-	} else {
-		strContent = "/Users/username/rep1//.git/objects\n../../../rep2//.git/objects"
-	}
-	content := []byte(strContent)
-	f.Write(content)
+	altpath := dotFS.Join("objects", "info", "alternates")
+	f, err := dotFS.Create(altpath)
+	assert.NoError(t, err)
+	f.Write([]byte(content))
 	f.Close()
 
 	dotgits, err := dir.Alternates()
-	c.Assert(err, IsNil)
-	if runtime.GOOS == "windows" {
-		c.Assert(dotgits[0].fs.Root(), Equals, "C:\\Users\\username\\repo1\\.git")
-	} else {
-		c.Assert(dotgits[0].fs.Root(), Equals, "/Users/username/rep1/.git")
-	}
-
-	// For relative path:
-	// /some/absolute/path/to/dot-git -> /some/absolute/path
-	pathx := strings.Split(fs.Root(), string(filepath.Separator))
-	pathx = pathx[:len(pathx)-2]
-	// Use string.Join() to avoid malformed absolutepath on windows
-	// C:Users\\User\\... instead of C:\\Users\\appveyor\\... .
-	resolvedPath := strings.Join(pathx, string(filepath.Separator))
-	// Append the alternate path to the resolvedPath
-	expectedPath := fs.Join(string(filepath.Separator), resolvedPath, "rep2", ".git")
-	if runtime.GOOS == "windows" {
-		expectedPath = fs.Join(resolvedPath, "rep2", ".git")
-	}
-
-	c.Assert(dotgits[1].fs.Root(), Equals, expectedPath)
+	assert.NoError(t, err)
+	assert.Len(t, dotgits, 1)
 }
 
 type norwfs struct {
@@ -863,4 +977,72 @@ func (s *SuiteDotGit) TestIncBytes(c *C) {
 		c.Assert(out, DeepEquals, test.out)
 		c.Assert(overflow, Equals, test.overflow)
 	}
+}
+
+// this filesystem wrapper returns os.ErrNotExist if the file matches
+// the provided paths list
+type notExistsFS struct {
+	billy.Filesystem
+
+	paths []string
+}
+
+func (f *notExistsFS) matches(path string) bool {
+	p := filepath.ToSlash(path)
+	for _, n := range f.paths {
+		if p == n {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *notExistsFS) Open(filename string) (billy.File, error) {
+	if f.matches(filename) {
+		return nil, os.ErrNotExist
+	}
+
+	return f.Filesystem.Open(filename)
+}
+
+func (f *notExistsFS) ReadDir(path string) ([]os.FileInfo, error) {
+	if f.matches(path) {
+		return nil, os.ErrNotExist
+	}
+
+	return f.Filesystem.ReadDir(path)
+}
+
+func (s *SuiteDotGit) TestDeletedRefs(c *C) {
+	fs, clean := s.TemporalFilesystem()
+	defer clean()
+
+	dir := New(&notExistsFS{
+		Filesystem: fs,
+		paths: []string{
+			"refs/heads/bar",
+			"refs/heads/baz",
+		},
+	})
+
+	err := dir.SetRef(plumbing.NewReferenceFromStrings(
+		"refs/heads/foo",
+		"e8d3ffab552895c19b9fcf7aa264d277cde33881",
+	), nil)
+	c.Assert(err, IsNil)
+	err = dir.SetRef(plumbing.NewReferenceFromStrings(
+		"refs/heads/bar",
+		"a8d3ffab552895c19b9fcf7aa264d277cde33881",
+	), nil)
+	c.Assert(err, IsNil)
+	err = dir.SetRef(plumbing.NewReferenceFromStrings(
+		"refs/heads/baz/baz",
+		"a8d3ffab552895c19b9fcf7aa264d277cde33881",
+	), nil)
+	c.Assert(err, IsNil)
+
+	refs, err := dir.Refs()
+	c.Assert(err, IsNil)
+	c.Assert(refs, HasLen, 1)
+	c.Assert(refs[0].Name(), Equals, plumbing.ReferenceName("refs/heads/foo"))
 }
