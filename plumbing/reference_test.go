@@ -1,6 +1,10 @@
 package plumbing
 
-import . "gopkg.in/check.v1"
+import (
+	"testing"
+
+	. "gopkg.in/check.v1"
+)
 
 type ReferenceSuite struct{}
 
@@ -97,4 +101,81 @@ func (s *ReferenceSuite) TestIsRemote(c *C) {
 func (s *ReferenceSuite) TestIsTag(c *C) {
 	r := ReferenceName("refs/tags/v3.1.")
 	c.Assert(r.IsTag(), Equals, true)
+}
+
+func (s *ReferenceSuite) TestValidReferenceNames(c *C) {
+	valid := []ReferenceName{
+		"refs/heads/master",
+		"refs/notes/commits",
+		"refs/remotes/origin/master",
+		"HEAD",
+		"refs/tags/v3.1.1",
+		"refs/pulls/1/head",
+		"refs/pulls/1/merge",
+		"refs/pulls/1/abc.123",
+		"refs/pulls",
+		"refs/-", // should this be allowed?
+	}
+	for _, v := range valid {
+		c.Assert(v.Validate(), IsNil)
+	}
+
+	invalid := []ReferenceName{
+		"refs",
+		"refs/",
+		"refs//",
+		"refs/heads/\\",
+		"refs/heads/\\foo",
+		"refs/heads/\\foo/bar",
+		"abc",
+		"",
+		"refs/heads/ ",
+		"refs/heads/ /",
+		"refs/heads/ /foo",
+		"refs/heads/.",
+		"refs/heads/..",
+		"refs/heads/foo..",
+		"refs/heads/foo.lock",
+		"refs/heads/foo@{bar}",
+		"refs/heads/foo[",
+		"refs/heads/foo~",
+		"refs/heads/foo^",
+		"refs/heads/foo:",
+		"refs/heads/foo?",
+		"refs/heads/foo*",
+		"refs/heads/foo[bar",
+		"refs/heads/foo\t",
+		"refs/heads/@",
+		"refs/heads/@{bar}",
+		"refs/heads/\n",
+		"refs/heads/-foo",
+		"refs/heads/foo..bar",
+		"refs/heads/-",
+		"refs/tags/-",
+		"refs/tags/-foo",
+	}
+
+	for i, v := range invalid {
+		comment := Commentf("invalid reference name case %d: %s", i, v)
+		c.Assert(v.Validate(), NotNil, comment)
+		c.Assert(v.Validate(), ErrorMatches, "invalid reference name", comment)
+	}
+}
+
+func benchMarkReferenceString(r *Reference, b *testing.B) {
+	for n := 0; n < b.N; n++ {
+		_ = r.String()
+	}
+}
+
+func BenchmarkReferenceStringSymbolic(b *testing.B) {
+	benchMarkReferenceString(NewSymbolicReference("v3.1.1", "refs/tags/v3.1.1"), b)
+}
+
+func BenchmarkReferenceStringHash(b *testing.B) {
+	benchMarkReferenceString(NewHashReference("v3.1.1", NewHash("6ecf0ef2c2dffb796033e5a02219af86ec6584e5")), b)
+}
+
+func BenchmarkReferenceStringInvalid(b *testing.B) {
+	benchMarkReferenceString(&Reference{}, b)
 }
